@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EYE MAZE</title>
+<meta name="description" content="A maze you steer with your eyes. Webcam gaze tracking runs locally in your browser.">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2304060a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%235ff2ff'/%3E%3C/svg%3E">
+</head>
+<body>
+<canvas id="stage" aria-label="Maze"></canvas>
+<!-- the camera feed is only read by the on-device model; it is never shown full-size, recorded or uploaded -->
+<video id="cam" playsinline muted autoplay></video>
+
+<!-- HUD -->
+<header id="hud" hidden>
+  <div class="hud-left">
+    <span class="hud-level" id="hud-level">LEVEL 1</span>
+    <span class="hud-name" id="hud-name"></span>
+  </div>
+  <div class="hud-center" id="hud-hint"></div>
+  <div class="hud-right">
+    <span class="hud-mode" id="hud-mode" hidden title="maze mode">↔</span>
+    <span class="hud-time" id="hud-time">0:00</span>
+    <button class="icon-btn" id="btn-settings" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.4" d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4 1 2-3.4-2-1.6Z"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- small, non-blocking tracking status -->
+<div id="status" hidden><i></i><span id="status-text">tracking</span></div>
+
+<!-- START -->
+<section class="screen" id="screen-start">
+  <div class="panel">
+    <div class="logo"><span class="logo-eye"></span>EYE&nbsp;MAZE</div>
+    <p class="lede">Steer a point of light through the maze with your eyes.</p>
+    <ol class="howto">
+      <li><b>Look</b> left, right, up or down — the ball rolls that way.</li>
+      <li><b>Look at the middle</b> of the screen — the ball stops.</li>
+      <li>No setup: allow the camera and the maze begins.</li>
+    </ol>
+    <p class="note">Your camera is processed locally in this browser by an on-device face model. Video is never recorded, stored or uploaded.</p>
+    <p class="warn" id="proto-warn" hidden></p>
+    <div class="actions">
+      <button class="primary" id="btn-start">Start</button>
+    </div>
+    <p class="tiny">Works best with your face evenly lit and the webcam roughly at eye level. <a href="?test" id="link-test">Test mode (keyboard, no camera)</a></p>
+  </div>
+</section>
+
+<!-- PERMISSION / LOADING -->
+<section class="screen" id="screen-permission" hidden>
+  <div class="panel">
+    <div class="spinner"></div>
+    <h2 id="perm-title">Camera access</h2>
+    <p id="perm-msg">Your browser will ask to use the camera. Choose <b>Allow</b>.</p>
+    <div class="actions" id="perm-actions" hidden>
+      <button class="primary" id="btn-retry">Try again</button>
+    </div>
+  </div>
+</section>
+
+<!-- CENTRE STAGE: tracking lock + level intro (non-blocking, over the maze) -->
+<section class="screen clear" id="screen-center" hidden>
+  <div class="ready">
+    <div class="ready-title" id="ready-title">LEVEL 1</div>
+    <div class="ready-name" id="ready-name"></div>
+    <div class="ready-hint" id="ready-hint"></div>
+    <div class="ready-ring" id="ready-ring"><svg viewBox="0 0 50 50"><circle class="bg" cx="25" cy="25" r="22"/><circle class="fg" id="ready-fg" cx="25" cy="25" r="22"/></svg><span class="ready-num" id="ready-num"></span></div>
+    <div class="ready-sub" id="ready-sub"></div>
+  </div>
+</section>
+
+<!-- OPTIONAL QUICK CALIBRATION (full-screen layer) -->
+<div id="calib" hidden>
+  <div class="cal-step"></div>
+  <div class="cal-text"></div>
+  <div class="cal-dot"><svg class="cal-ring" viewBox="0 0 50 50"><circle class="bg" cx="25" cy="25" r="22"/><circle class="fg" cx="25" cy="25" r="22"/></svg></div>
+</div>
+
+<!-- SETTINGS (optional) -->
+<aside id="settings" hidden aria-label="Settings">
+  <div class="set-head"><span>SETTINGS</span><button class="icon-btn" id="btn-settings-close" aria-label="Close">✕</button></div>
+  <p class="set-note">The game pauses while this is open. Everything here is optional.</p>
+  <label class="set-slider">Sensitivity <input type="range" id="sl-sens" min="0.6" max="1.8" step="0.05" value="1"><b id="sl-sens-v">1.00</b></label>
+  <label class="set-slider">Up / down boost <input type="range" id="sl-vsens" min="0.6" max="2.2" step="0.05" value="1"><b id="sl-vsens-v">1.00</b></label>
+  <label class="set-slider">Smoothing <input type="range" id="sl-smooth" min="0.3" max="4" step="0.1" value="1.2"><b id="sl-smooth-v">1.2</b></label>
+  <label class="set-slider">Ball speed <input type="range" id="sl-speed" min="0.5" max="1.8" step="0.05" value="1"><b id="sl-speed-v">1.00</b></label>
+  <label class="set-check"><input type="checkbox" id="cb-mirror"> Swap left / right <small>(for mirrored cameras)</small></label>
+  <label class="set-check"><input type="checkbox" id="cb-debug"> Show debug panel</label>
+  <div class="set-mode" id="set-mode">Tracking: automatic (no calibration)</div>
+  <div class="set-actions">
+    <button class="ghost small" id="btn-recenter" title="Look at the middle of the screen for a second">Re-centre</button>
+    <button class="ghost small" id="btn-quickcal">Quick calibration (10 s)</button>
+    <button class="ghost small" id="btn-auto" hidden>Back to automatic</button>
+    <button class="ghost small" id="btn-reset">Reset settings</button>
+  </div>
+  <p class="set-note">Quick calibration can improve accuracy for your eyes and camera. It is kept for this session, including level changes and restarts.</p>
+</aside>
+
+<!-- SUCCESS -->
+<section class="screen" id="screen-success" hidden>
+  <div class="panel">
+    <div class="logo small"><span class="logo-eye green"></span>OUT</div>
+    <h2 id="succ-title">You found the way out.</h2>
+    <ul class="times" id="succ-times"></ul>
+    <div class="ready-ring"><svg viewBox="0 0 50 50"><circle class="bg" cx="25" cy="25" r="22"/><circle class="fg" id="succ-fg" cx="25" cy="25" r="22"/></svg></div>
+    <p class="tiny" id="succ-sub">A new run starts in a moment — or</p>
+    <div class="actions">
+      <button class="primary" id="btn-succ-again">Play again now</button>
+    </div>
+  </div>
+</section>
+
+<!-- DEBUG PANEL (optional) -->
+<aside id="debug" hidden>
+  <div class="dbg-head">DEBUG <span class="dbg-src" id="dbg-src"></span></div>
+  <canvas id="dbg-preview" width="200" height="150"></canvas>
+  <div class="dbg-dir" id="dbg-dir">—</div>
+  <div class="dbg-row"><span>state</span><b id="dbg-state">—</b></div>
+  <div class="dbg-row"><span>confidence</span><div class="bar"><i id="dbg-conf"></i></div><b id="dbg-confv"></b></div>
+  <div class="dbg-row"><span>gaze x</span><div class="bar axis"><i id="dbg-x"></i><em class="th" id="dbg-thx"></em></div><b id="dbg-xv"></b></div>
+  <div class="dbg-row"><span>gaze y</span><div class="bar axis"><i id="dbg-y"></i><em class="th" id="dbg-thy"></em></div><b id="dbg-yv"></b></div>
+  <div class="dbg-row"><span>head</span><b id="dbg-head">—</b></div>
+  <div class="dbg-row"><span>neutral Δ</span><b id="dbg-off">—</b></div>
+  <div class="dbg-row"><span>model</span><b id="dbg-q">—</b></div>
+  <div class="dbg-row"><span>fps</span><b id="dbg-fps">—</b></div>
+  <div class="dbg-foot">confidence is a heuristic (stability × head pose × model quality), not a model score.</div>
+</aside>
+
+<div id="toast" hidden></div>
+
+<script>
+  // ES modules and the camera do not work from file:// — explain instead of failing silently
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', function () {
+      var w = document.getElementById('proto-warn');
+      w.hidden = false;
+      w.innerHTML = 'This page was opened as a file. Browsers block the camera and JavaScript modules there. Open it from GitHub Pages, or run a local server in this folder (see README.md).';
+      document.getElementById('btn-start').disabled = true;
+    });
+  }
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

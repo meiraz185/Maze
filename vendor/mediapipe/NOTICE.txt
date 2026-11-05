@@ -1,0 +1,3 @@
+MediaPipe Tasks Vision 1.2.2 (@mediapipe/tasks-vision) — Copyright Google LLC.
+Licensed under the Apache License, Version 2.0: https://www.apache.org/licenses/LICENSE-2.0
+Files: vision_bundle.mjs, wasm/vision_wasm_internal.js, wasm/vision_wasm_internal.wasm (unmodified).

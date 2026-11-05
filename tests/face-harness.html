@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>face harness</title>
+<body>
+<script type="module">
+// Test harness: runs the real MediaPipe Face Landmarker + EYE MAZE feature extraction on still images.
+import { FilesetResolver, FaceLandmarker } from '../vendor/mediapipe/vision_bundle.mjs';
+import { extractFeatures } from '../js/gaze.js';
+
+window.ready = (async () => {
+  const fs = await FilesetResolver.forVisionTasks(new URL('../vendor/mediapipe/wasm', location.href).href);
+  window.lmk = await FaceLandmarker.createFromOptions(fs, {
+    baseOptions: { modelAssetPath: '../models/face_landmarker.task', delegate: 'CPU' },
+    runningMode: 'IMAGE', numFaces: 1, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true,
+  });
+  return true;
+})();
+
+const EYE_A = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
+const EYE_B = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398];
+const load = async (url) => { const i = new Image(); i.src = url; await i.decode(); return i; };
+
+/**
+ * Make a test variant of a face photo.
+ * Geometric: tx/ty (px), scale, rot (deg), mirror.
+ * Iris: shift both irises by (irisDx, irisDy) iris-radii using a smooth warp confined to the eye opening —
+ * a crude stand-in for an eye movement (real eyes also move lids/shading; this does not).
+ */
+window.variant = async (url, v = {}, lm = null) => {
+  const img = await load(url);
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  g.save();
+  g.translate(W / 2 + (v.tx || 0), H / 2 + (v.ty || 0));
+  g.rotate(((v.rot || 0) * Math.PI) / 180);
+  g.scale((v.scale || 1) * (v.mirror ? -1 : 1), v.scale || 1);
+  g.drawImage(img, -W / 2, -H / 2);
+  g.restore();
+  if ((v.irisDx || v.irisDy) && lm) {
+    const src = g.getImageData(0, 0, W, H);
+    const dst = g.getImageData(0, 0, W, H);
+    const mk = document.createElement('canvas'); mk.width = W; mk.height = H;
+    const mg = mk.getContext('2d');
+    mg.filter = 'blur(1.5px)'; mg.fillStyle = '#fff';
+    for (const poly of [EYE_A, EYE_B]) { mg.beginPath(); poly.forEach((i, k) => (k ? mg.lineTo : mg.moveTo).call(mg, lm[i][0] * W, lm[i][1] * H)); mg.closePath(); mg.fill(); }
+    const mask = mg.getImageData(0, 0, W, H).data;
+    for (const [ci, ri] of [[468, 469], [473, 474]]) {
+      const cx = lm[ci][0] * W, cy = lm[ci][1] * H;
+      const R = Math.hypot(lm[ri][0] * W - cx, lm[ri][1] * H - cy);
+      const dx = (v.irisDx || 0) * R, dy = (v.irisDy || 0) * R, sig = R * 1.15;
+      const x0 = Math.max(0, Math.floor(cx - 4 * R)), x1 = Math.min(W - 1, Math.ceil(cx + 4 * R));
+      const y0 = Math.max(0, Math.floor(cy - 3 * R)), y1 = Math.min(H - 1, Math.ceil(cy + 3 * R));
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const m = mask[(y * W + x) * 4] / 255;
+        if (m <= 0) continue;
+        const w = Math.exp(-(((x - cx - dx * 0.5) ** 2 + (y - cy - dy * 0.5) ** 2) / (2 * sig * sig))) * m;
+        const sx = x - dx * w, sy = y - dy * w;
+        const ix = Math.floor(sx), iy = Math.floor(sy), fx = sx - ix, fy = sy - iy;
+        for (let ch = 0; ch < 3; ch++) {
+          const p = (yy, xx) => src.data[(Math.min(H - 1, Math.max(0, yy)) * W + Math.min(W - 1, Math.max(0, xx))) * 4 + ch];
+          dst.data[(y * W + x) * 4 + ch] = (p(iy, ix) * (1 - fx) + p(iy, ix + 1) * fx) * (1 - fy) + (p(iy + 1, ix) * (1 - fx) + p(iy + 1, ix + 1) * fx) * fy;
+        }
+      }
+    }
+    g.putImageData(dst, 0, 0);
+  }
+  return c.toDataURL('image/jpeg', 0.95);
+};
+
+window.analyse = async (url) => {
+  await window.ready;
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  const r = window.lmk.detect(img);
+  const lm = r.faceLandmarks[0];
+  if (!lm) return { found: false };
+  const f = extractFeatures(lm, img.naturalWidth / img.naturalHeight,
+    r.faceBlendshapes[0] && r.faceBlendshapes[0].categories,
+    r.facialTransformationMatrixes[0] && r.facialTransformationMatrixes[0].data);
+  const bs = {}; for (const c of (r.faceBlendshapes[0] ? r.faceBlendshapes[0].categories : [])) bs[c.categoryName] = c.score;
+  return { found: true, n: lm.length, f, bs, W: img.naturalWidth, H: img.naturalHeight, lm: lm.map((p) => [p.x, p.y]), lm3: lm.map((p) => [p.x, p.y, p.z]), matrix: r.facialTransformationMatrixes[0] && Array.from(r.facialTransformationMatrixes[0].data) };
+};
+</script>
+</body>
